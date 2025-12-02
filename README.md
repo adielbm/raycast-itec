@@ -1,3 +1,3 @@
-# ITEC Tennis Courts
+בדיקת זמינות מגרשים ב[מרכזי הטניס והחינוך בישראל](https://tennis.org.il/) דרך [Raycast](https://www.raycast.com/).
 
-View available tennis courts at Israel Tennis & Education Centers (ITEC) directly from Raycast.
+![screenshot](metadata/itec-courts-1.png)

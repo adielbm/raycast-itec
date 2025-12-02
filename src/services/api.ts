@@ -7,6 +7,7 @@ import { formatDate } from "../utils/date";
 const BASE_URL = "https://center.tennis.org.il";
 const SEARCH_COURT_URL = `${BASE_URL}/self_services/search_court.js`;
 const SET_TIME_BY_UNIT_URL = `${BASE_URL}/self_services/set_time_by_unit`;
+const SELECT_COURT_URL = `${BASE_URL}/self_services/select_court_invitation.js`;
 
 // Cache for time slots by unit and weekday
 const timeSlotsCache = new Cache();
@@ -241,4 +242,58 @@ function parseTimeSlots(responseText: string): string[] {
   }
 
   return timeSlots;
+}
+
+/**
+ * Select a court for booking
+ */
+export interface SelectCourtParams {
+  courtId: number;
+  duration: number;
+  startTime: string; // Format: YYYY-MM-DD HH:mm:ss UTC
+  endTime: string; // Format: YYYY-MM-DD HH:mm:ss UTC
+}
+
+export async function selectCourt(
+  params: SelectCourtParams,
+  credentials: AuthCredentials
+): Promise<boolean> {
+  try {
+    // Get authentication tokens
+    const tokens = await getAuthTokens(credentials);
+    if (!tokens) {
+      throw new Error("Failed to authenticate");
+    }
+
+    // Build the URL with query parameters
+    const url = new URL(SELECT_COURT_URL);
+    url.searchParams.append("court_id", params.courtId.toString());
+    url.searchParams.append("duration", params.duration.toString());
+    url.searchParams.append("end_time", params.endTime);
+    url.searchParams.append("start_time", params.startTime);
+
+    console.log(`[selectCourt] Making POST request to: ${url.toString()}`);
+
+    // Make the POST request
+    const response = await fetch(url.toString(), {
+      method: "POST",
+      headers: {
+        Cookie: `_session_id=${tokens.sessionId}`,
+        "X-Requested-With": "XMLHttpRequest",
+      },
+    });
+
+    if (!response.ok) {
+      console.error(`[selectCourt] HTTP error! status: ${response.status}`);
+      return false;
+    }
+
+    const responseText = await response.text();
+    console.log(`[selectCourt] Response:`, responseText);
+
+    return true;
+  } catch (error) {
+    console.error("Error selecting court:", error);
+    return false;
+  }
 }

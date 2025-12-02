@@ -1,8 +1,8 @@
-import { List, getPreferenceValues, showToast, Toast, Color, Icon, Action, ActionPanel, Cache } from "@raycast/api";
+import { List, getPreferenceValues, showToast, Toast, Color, Icon, Action, ActionPanel, Cache, open } from "@raycast/api";
 import { useState, useEffect } from "react";
-import { searchCourts, fetchTimeSlots } from "./services/api";
+import { searchCourts, fetchTimeSlots, selectCourt } from "./services/api";
 import { getToday, getNextDays, generateTimeSlotsForDate, formatDisplayDateTime, formatDateDisplay } from "./utils/date";
-import { CourtAvailability } from "./utils/parser";
+import { CourtAvailability, CourtSlot } from "./utils/parser";
 
 interface Preferences {
   tennisCenter: string;
@@ -23,10 +23,169 @@ interface TimeSlotResult {
 // Cache for reserved slots (persists across extension sessions)
 const reservedCache = new Cache();
 
+function CourtsList({ 
+  slots, 
+  time, 
+  date,
+  onBack 
+}: { 
+  slots: CourtSlot[]; 
+  time: string;
+  date: Date;
+  onBack: () => void;
+}) {
+  const preferences = getPreferenceValues<Preferences>();
+  const [availabilityByDuration, setAvailabilityByDuration] = useState<Map<number, Map<number, CourtAvailability>>>(new Map());
+  const [isLoadingDurations, setIsLoadingDurations] = useState(true);
+
+  // Extract unique court numbers from slots
+  const courtNumbers = [...new Set(slots.map(s => s.courtNumber))];
+
+  useEffect(() => {
+    async function fetchDurationAvailability() {
+      const durations = [1, 2, 3]; // Check 1, 2, and 3 hour durations
+      const availabilityMap = new Map<number, Map<number, CourtAvailability>>();
+
+      for (const duration of durations) {
+        const courtMap = new Map<number, CourtAvailability>();
+        
+        const availability = await searchCourts(
+          {
+            unitId: preferences.tennisCenter,
+            date: date,
+            startHour: time,
+            duration: duration,
+          },
+          {
+            email: preferences.email,
+            userId: preferences.userId,
+          }
+        );
+
+        if (availability && availability.status === "available") {
+          // Map by court number
+          availability.slots.forEach(slot => {
+            courtMap.set(slot.courtNumber, availability);
+          });
+        }
+
+        availabilityMap.set(duration, courtMap);
+      }
+
+      setAvailabilityByDuration(availabilityMap);
+      setIsLoadingDurations(false);
+    }
+
+    fetchDurationAvailability();
+  }, [time, date, preferences.tennisCenter, preferences.email, preferences.userId]);
+
+  const handleSelectCourt = async (slot: CourtSlot, duration: number) => {
+    // Find the slot for the requested duration
+    const durationAvailability = availabilityByDuration.get(duration);
+    const courtAvailability = durationAvailability?.get(slot.courtNumber);
+    const targetSlot = courtAvailability?.slots.find(s => s.courtNumber === slot.courtNumber);
+
+    if (!targetSlot) {
+      showToast({
+        style: Toast.Style.Failure,
+        title: "Error",
+        message: "Court slot information not found",
+      });
+      return;
+    }
+
+    showToast({
+      style: Toast.Style.Animated,
+      title: "Selecting court...",
+      message: `Court ${slot.courtNumber} - ${duration}h at ${time}`,
+    });
+
+    const success = await selectCourt(
+      {
+        courtId: targetSlot.courtId,
+        duration: targetSlot.duration,
+        startTime: targetSlot.startTime,
+        endTime: targetSlot.endTime,
+      },
+      {
+        email: preferences.email,
+        userId: preferences.userId,
+      }
+    );
+
+    if (success) {
+      showToast({
+        style: Toast.Style.Success,
+        title: "Court selected!",
+        message: `Court ${slot.courtNumber} - ${duration}h at ${time}`,
+      });
+      // Open the booking page in browser
+      await open("https://center.tennis.org.il/self_services/court_invitation");
+    } else {
+      showToast({
+        style: Toast.Style.Failure,
+        title: "Failed to select court",
+        message: "Please try again",
+      });
+    }
+  };
+
+  // Check which durations are available for each court
+  const getAvailableDurations = (courtNumber: number): number[] => {
+    const durations: number[] = [];
+    availabilityByDuration.forEach((courtMap, duration) => {
+      if (courtMap.has(courtNumber)) {
+        durations.push(duration);
+      }
+    });
+    return durations.sort((a, b) => a - b);
+  };
+
+  return (
+    <List 
+      navigationTitle={`Select Court - ${time}`} 
+      searchBarPlaceholder="Choose a court..."
+      isLoading={isLoadingDurations}
+    >
+      {slots.map((slot) => {
+        const availableDurations = getAvailableDurations(slot.courtNumber);
+        const hasMultipleDurations = availableDurations.length > 1;
+
+        return (
+          <List.Item
+            key={slot.courtId}
+            icon={{ source: Icon.Circle, tintColor: Color.Green }}
+            title={`Court ${slot.courtNumber}`}
+            subtitle={availableDurations.length > 0 ? `Up to ${Math.max(...availableDurations)} hour${Math.max(...availableDurations) > 1 ? 's' : ''}` : ''}
+            actions={
+              <ActionPanel>
+                <ActionPanel.Section title="Select Duration">
+                  {availableDurations.map((duration) => (
+                    <Action
+                      key={duration}
+                      title={`Book for ${duration} Hour${duration > 1 ? 's' : ''}`}
+                      onAction={() => handleSelectCourt(slot, duration)}
+                      shortcut={duration === 1 ? { modifiers: [], key: "return" } : undefined}
+                    />
+                  ))}
+                </ActionPanel.Section>
+                <ActionPanel.Section>
+                  <Action title="Go Back" onAction={onBack} />
+                </ActionPanel.Section>
+              </ActionPanel>
+            }
+          />
+        );
+      })}
+    </List>
+  );
+}
+
 function CourtsForDate({ selectedDate }: { selectedDate: Date }) {
   const preferences = getPreferenceValues<Preferences>();
   const [results, setResults] = useState<TimeSlotResult[]>([]);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [selectedTimeSlot, setSelectedTimeSlot] = useState<{ slots: CourtSlot[]; time: string } | null>(null);
 
   useEffect(() => {
     async function fetchCourts() {
@@ -188,6 +347,17 @@ function CourtsForDate({ selectedDate }: { selectedDate: Date }) {
     fetchCourts();
   }, [selectedDate]);
 
+  if (selectedTimeSlot) {
+    return (
+      <CourtsList 
+        slots={selectedTimeSlot.slots} 
+        time={selectedTimeSlot.time}
+        date={selectedDate}
+        onBack={() => setSelectedTimeSlot(null)} 
+      />
+    );
+  }
+
   return (
     <List isLoading={isInitialLoad} searchBarPlaceholder={`${formatDateDisplay(selectedDate)}`}
     navigationTitle={formatDateDisplay(selectedDate)}>
@@ -244,6 +414,16 @@ function CourtsForDate({ selectedDate }: { selectedDate: Date }) {
             title={title}
             subtitle={subtitle}
             accessories={accessories}
+            actions={
+              availability && availability.status === "available" && availability.slots.length > 0 ? (
+                <ActionPanel>
+                  <Action
+                    title="View Available Courts"
+                    onAction={() => setSelectedTimeSlot({ slots: availability.slots, time })}
+                  />
+                </ActionPanel>
+              ) : undefined
+            }
             detail={
               <List.Item.Detail
                 metadata={
