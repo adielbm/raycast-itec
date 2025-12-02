@@ -1,0 +1,9 @@
+{
+	"servers": {
+		"Raycast API": {
+			"url": "https://developers.raycast.com/~gitbook/mcp",
+			"type": "http"
+		}
+	},
+	"inputs": []
+}
