@@ -197,10 +197,11 @@ export async function fetchTimeSlots(
 
 /**
  * Parse time slots from the jQuery HTML response
- * Filters out half-hour slots (only keeps full hours like 08:00, 09:00, etc.)
+ * Extracts all available time slots, filtering to show half-hour slots only when
+ * the corresponding full hour is not available
  */
 function parseTimeSlots(responseText: string): string[] {
-  const timeSlots: string[] = [];
+  const allSlots: string[] = [];
 
   const patterns = [
     // 1. Matches escaped quotes: value=\"08:00\" (This is what your input contains)
@@ -226,22 +227,43 @@ function parseTimeSlots(responseText: string): string[] {
       matchCount++;
       const time = match[1];
       
-      // Only include full hour slots (ignore 30-minute intervals)
       // Check !includes to prevent duplicates
-      if (time.endsWith(":00") && !timeSlots.includes(time)) {
-        timeSlots.push(time);
-        // console.log(`[parseTimeSlots] ✓ Added time slot: ${time}`);
+      if (!allSlots.includes(time)) {
+        allSlots.push(time);
+        // console.log(`[parseTimeSlots] ✓ Found time slot: ${time}`);
       }
     }
     
     // If we found slots with this pattern, we can stop checking other patterns
-    if (timeSlots.length > 0) {
-      // console.log(`[parseTimeSlots] Success with pattern ${i+1}! Found ${timeSlots.length} slots`);
+    if (allSlots.length > 0) {
+      // console.log(`[parseTimeSlots] Success with pattern ${i+1}! Found ${allSlots.length} slots`);
       break;
     }
   }
 
-  return timeSlots;
+  // Filter: include half-hour slots only if the next full hour is not available
+  const filteredSlots: string[] = [];
+  
+  for (const slot of allSlots) {
+    if (slot.endsWith(':00')) {
+      // Always include full hours
+      filteredSlots.push(slot);
+    } else if (slot.endsWith(':30')) {
+      // Include half hour only if the next full hour is NOT in the list
+      const [hours, _] = slot.split(':');
+      const nextHour = String(parseInt(hours) + 1).padStart(2, '0') + ':00';
+      
+      if (!allSlots.includes(nextHour)) {
+        filteredSlots.push(slot);
+        // console.log(`[parseTimeSlots] Including ${slot} because ${nextHour} is not available`);
+      } else {
+        // console.log(`[parseTimeSlots] Skipping ${slot} because ${nextHour} is available`);
+      }
+    }
+  }
+
+  // console.log(`[parseTimeSlots] Filtered to ${filteredSlots.length} slots:`, filteredSlots);
+  return filteredSlots;
 }
 
 /**

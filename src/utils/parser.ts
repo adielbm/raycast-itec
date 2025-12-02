@@ -14,14 +14,12 @@ export interface CourtSlot {
  * Check if the response indicates no courts available
  */
 export function isNoCourtsAvailable(html: string): boolean {
-  return !html.includes("בחר");
-}
 
-/**
- * Check if the response indicates reserved (for kids/tournaments)
- */
-export function isReserved(html: string): boolean {
-  return html.includes("לא נמצאו מגרשים פנויים");
+  if (html.includes("alert-success")) {
+    return false;
+  }
+
+  return html.includes("מועדים אחרים") || html.includes("alert-danger") || html.includes("נסה מועד אחר");
 }
 
 /**
@@ -55,7 +53,7 @@ export function parseCourtSlots(html: string): CourtSlot[] {
 export function extractHtmlFromResponse(response: string): string {
   // Captures the content inside the jQuery .html('...') function call
   const match = response.match(/jQuery\('#step-2'\)\.html\('([\s\S]*?)'\);/);
-  
+
   if (!match) return "";
 
   // The content is a JS string literal, so we must unescape it to get valid HTML
@@ -73,33 +71,33 @@ export function extractHtmlFromResponse(response: string): string {
  * Parse the full API response and determine availability status
  */
 export interface CourtAvailability {
-  status: "available" | "reserved" | "no-courts";
+  status: "available" | "no-courts";
   courts: number[]; // Available court numbers
   slots: CourtSlot[]; // Detailed slot information
+  suggestedTimes?: string[]; // Alternative time suggestions when no courts available
 }
 
 export function parseCourtAvailability(response: string): CourtAvailability {
   const html = extractHtmlFromResponse(response);
 
-  if (isReserved(html)) {
 
-    // console.log("isReserved");
-
-    return {
-      status: "reserved",
-      courts: [],
-      slots: [],
-    };
-  }
 
   if (isNoCourtsAvailable(html)) {
 
     // console.log("isNoCourtsAvailable");
 
+    // Check if there are alternative time suggestions in the HTML
+    const suggestedTimes = parseSuggestedTimes(html);
+    
+    if (suggestedTimes.length > 0) {
+      // console.log("Found suggested alternative times:", suggestedTimes);
+    }
+
     return {
       status: "no-courts",
       courts: [],
       slots: [],
+      suggestedTimes: suggestedTimes.length > 0 ? suggestedTimes : undefined,
     };
   }
 
@@ -124,4 +122,26 @@ export function parseCourtAvailability(response: string): CourtAvailability {
     courts,
     slots,
   };
+}
+
+/**
+ * Parse suggested alternative times from "no courts available" response
+ * Example: <h3>20:30-21:30</h3> or <h3>21:00-22:00</h3>
+ */
+export function parseSuggestedTimes(html: string): string[] {
+  const times: string[] = [];
+  
+  // Match time ranges in <h3> tags like "20:30-21:30" or "21:00-22:00"
+  const timeRegex = /<h3>(\d{2}:\d{2})-\d{2}:\d{2}<\/h3>/g;
+  
+  let match;
+  while ((match = timeRegex.exec(html)) !== null) {
+    const startTime = match[1];
+    if (!times.includes(startTime)) {
+      times.push(startTime);
+      // console.log(`[parseSuggestedTimes] Found suggested time: ${startTime}`);
+    }
+  }
+  
+  return times;
 }

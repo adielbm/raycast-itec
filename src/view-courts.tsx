@@ -133,9 +133,16 @@ function CourtsForDate({ selectedDate }: { selectedDate: Date }) {
   const [selectedTimeSlot, setSelectedTimeSlot] = useState<{ slots: CourtSlot[]; time: string } | null>(null);
 
   useEffect(() => {
+    let isCancelled = false;
+    
     async function fetchCourts() {
       try {
         // console.log(`[fetchCourts] Starting for date: ${selectedDate.toDateString()}, center: ${preferences.tennisCenter}`);
+        
+        if (isCancelled) {
+          // console.log(`[fetchCourts] Cancelled before starting`);
+          return;
+        }
 
         // First, fetch available time slots for this unit and date
         const availableTimeSlots = await fetchTimeSlots(
@@ -165,29 +172,22 @@ function CourtsForDate({ selectedDate }: { selectedDate: Date }) {
         setResults(initialResults);
         setIsInitialLoad(false);
 
+        // Collect all suggested times first, then add them after all batches
+        const allSuggestedTimes = new Set<string>();
+
         // Fetch availability in batches of 5
         const batchSize = 5;
+        // console.log(`[fetchCourts] Total slots to fetch: ${slots.length}`);
         for (let batchStart = 0; batchStart < slots.length; batchStart += batchSize) {
           const batchEnd = Math.min(batchStart + batchSize, slots.length);
           const batchSlots = slots.slice(batchStart, batchEnd);
+          // console.log(`[fetchCourts] Processing batch ${batchStart}-${batchEnd - 1}, slots:`, batchSlots.map(s => s.time));
 
           // Process batch in parallel
           const batchPromises = batchSlots.map(async (slot, batchIndex) => {
             const actualIndex = batchStart + batchIndex;
-            const cacheKey = `reserved_${formatDisplayDateTime(slot.date, slot.time)}_${preferences.tennisCenter}`;
-
-            // Check cache for reserved status
-            if (reservedCache.has(cacheKey)) {
-              return {
-                index: actualIndex,
-                availability: {
-                  status: "reserved" as const,
-                  courts: [],
-                  slots: [],
-                },
-              };
-            }
-
+            // console.log(`[fetchCourts] Fetching slot ${actualIndex}: ${slot.time}`);
+        
             const availability = await searchCourts(
               {
                 unitId: preferences.tennisCenter,
@@ -201,20 +201,33 @@ function CourtsForDate({ selectedDate }: { selectedDate: Date }) {
               }
             );
 
-            // Cache reserved status
-            if (availability?.status === "reserved") {
-              reservedCache.set(cacheKey, "true");
-            }
+            // console.log(`[fetchCourts] Received availability for ${slot.time} (index ${actualIndex}):`, availability?.status);
 
             return { index: actualIndex, availability };
           });
 
           const batchResults = await Promise.all(batchPromises);
+          
+          if (isCancelled) {
+            // console.log(`[fetchCourts] Cancelled after batch ${batchStart}-${batchEnd - 1}`);
+            return;
+          }
+          
+          // console.log(`[fetchCourts] Batch ${batchStart}-${batchEnd - 1} completed, results:`, batchResults.map(r => ({ index: r.index, time: slots[r.index]?.time, status: r.availability?.status })));
+
+          // Collect suggested times from no-courts responses
+          batchResults.forEach(({ availability }) => {
+            if (availability?.status === "no-courts" && availability.suggestedTimes) {
+              availability.suggestedTimes.forEach(time => allSuggestedTimes.add(time));
+            }
+          });
 
           // Update results with batch data
+          // console.log(`[fetchCourts] Updating results for indices:`, batchResults.map(r => r.index));
           setResults((prevResults) => {
             const newResults = [...prevResults];
             batchResults.forEach(({ index, availability }) => {
+              // console.log(`[fetchCourts] Setting index ${index} (${newResults[index]?.time}) to isLoading=false, status=${availability?.status}`);
               newResults[index] = {
                 ...newResults[index],
                 availability,
@@ -226,70 +239,169 @@ function CourtsForDate({ selectedDate }: { selectedDate: Date }) {
 
           // Small delay between batches
           if (batchEnd < slots.length) {
+            // console.log(`[fetchCourts] Waiting before next batch...`);
             await new Promise((resolve) => setTimeout(resolve, 200));
           }
         }
+        
+        if (isCancelled) {
+          // console.log(`[fetchCourts] Cancelled after all batches`);
+          return;
+        }
 
-        // Consolidate continuous reserved ranges (only after all slots are loaded)
+        // Now add suggested times after all original batches are complete
+        if (allSuggestedTimes.size > 0) {
+          const suggestedTimes = Array.from(allSuggestedTimes);
+          // console.log(`[fetchCourts] All batches complete. Suggested times found:`, suggestedTimes);
+          
+          // Determine which times are new (not in the original slots)
+          const initialTimeSet = new Set(slots.map(s => s.time));
+          const newTimesToFetch = suggestedTimes.filter(time => !initialTimeSet.has(time));
+          
+          if (newTimesToFetch.length > 0) {
+            // console.log(`[fetchCourts] Adding ${newTimesToFetch.length} new suggested slots:`, newTimesToFetch);
+            
+            // Add new slots to the list with loading state
+            setResults((prevResults) => {
+              const existingTimes = new Set(prevResults.map(r => r.time));
+              const newSlots: TimeSlotResult[] = [];
+              
+              newTimesToFetch.forEach(time => {
+                if (!existingTimes.has(time)) {
+                  newSlots.push({
+                    dateTime: formatDisplayDateTime(selectedDate, time),
+                    date: selectedDate,
+                    time: time,
+                    availability: null,
+                    isLoading: true,
+                  });
+                }
+              });
+              
+              if (newSlots.length > 0) {
+                return [...prevResults, ...newSlots].sort((a, b) => {
+                  // Sort by time
+                  const [aH, aM] = a.time.split(':').map(Number);
+                  const [bH, bM] = b.time.split(':').map(Number);
+                  return (aH * 60 + aM) - (bH * 60 + bM);
+                });
+              }
+              return prevResults;
+            });
+            
+            // Fetch availability for newly added suggested slots
+            // console.log(`[fetchCourts] Fetching availability for ${newTimesToFetch.length} suggested times`);
+            for (const time of newTimesToFetch) {
+              if (isCancelled) return;
+              
+              // console.log(`[fetchCourts] Fetching availability for suggested time: ${time}`);
+              const availability = await searchCourts(
+                {
+                  unitId: preferences.tennisCenter,
+                  date: selectedDate,
+                  startHour: time,
+                  duration: 1,
+                },
+                {
+                  email: preferences.email,
+                  userId: preferences.userId,
+                }
+              );
+              
+              // console.log(`[fetchCourts] Received availability for suggested time ${time}:`, availability?.status);
+              
+              if (!isCancelled) {
+                setResults((prevResults) => {
+                  const newResults = [...prevResults];
+                  const index = newResults.findIndex(r => r.time === time);
+                  if (index !== -1) {
+                    newResults[index] = {
+                      ...newResults[index],
+                      availability,
+                      isLoading: false,
+                    };
+                  }
+                  return newResults;
+                });
+              }
+              
+              await new Promise((resolve) => setTimeout(resolve, 100));
+            }
+          }
+          // console.log(`[fetchCourts] Finished fetching all suggested times`);
+        }
+        
+        // console.log(`[fetchCourts] All batches completed. Final check of loading states...`);
         setResults((prevResults) => {
-          // Check if all results are loaded
-          const allLoaded = prevResults.every((r) => !r.isLoading);
-          if (!allLoaded || prevResults.length === 0) {
+          const stillLoading = prevResults.filter(r => r.isLoading);
+          if (stillLoading.length > 0) {
+            console.warn(`[fetchCourts] WARNING: ${stillLoading.length} slots still loading:`, stillLoading.map(r => r.time));
             return prevResults;
           }
-
-          const consolidated: TimeSlotResult[] = [];
-
-          // Single pass grouping without out-of-bounds access
-          let startIndex = 0;
-          while (startIndex < prevResults.length) {
-            const current = prevResults[startIndex];
-
-            if (current?.availability?.status !== "reserved") {
-              consolidated.push(current);
-              startIndex++;
+          
+          // console.log(`[fetchCourts] All slots loaded successfully. Merging consecutive no-courts ranges...`);
+          
+          // Merge consecutive "no-courts" slots into ranges
+          const merged: TimeSlotResult[] = [];
+          let i = 0;
+          
+          while (i < prevResults.length) {
+            const current = prevResults[i];
+            
+            // If not no-courts, add as-is
+            if (current.availability?.status !== "no-courts") {
+              merged.push(current);
+              i++;
               continue;
             }
-
-            // We are at the beginning of a reserved run
-            let endIndex = startIndex;
+            
+            // Find consecutive no-courts slots
+            let endIndex = i;
             while (
               endIndex + 1 < prevResults.length &&
-              prevResults[endIndex + 1]?.availability?.status === "reserved"
+              prevResults[endIndex + 1]?.availability?.status === "no-courts"
             ) {
               endIndex++;
             }
-
-            if (endIndex === startIndex) {
-              // Single reserved slot, keep as-is
-              consolidated.push(current);
+            
+            // If single slot or create range
+            if (endIndex === i) {
+              merged.push(current);
             } else {
-              // Consolidated reserved range
-              const rangeEndTime = prevResults[endIndex]?.time ?? current.time;
-              consolidated.push({
+              // Create range
+              merged.push({
                 ...current,
                 isRangeStart: true,
-                rangeEnd: rangeEndTime,
+                rangeEnd: prevResults[endIndex].time,
               });
             }
-
-            startIndex = endIndex + 1;
+            
+            i = endIndex + 1;
           }
+          
+          // console.log(`[fetchCourts] Merged ${prevResults.length} slots into ${merged.length} items`);
+          return merged;
+        });
 
-          return consolidated;
-        });
       } catch (error) {
-        console.error("Error fetching courts:", error);
-        showToast({
-          style: Toast.Style.Failure,
-          title: "Failed to fetch courts",
-          message: error instanceof Error ? error.message : "Unknown error",
-        });
-        setIsInitialLoad(false);
+        if (!isCancelled) {
+          console.error("Error fetching courts:", error);
+          showToast({
+            style: Toast.Style.Failure,
+            title: "Failed to fetch courts",
+            message: error instanceof Error ? error.message : "Unknown error",
+          });
+          setIsInitialLoad(false);
+        }
       }
     }
 
     fetchCourts();
+    
+    return () => {
+      // console.log(`[fetchCourts] Cleanup - cancelling fetch for ${selectedDate.toDateString()}`);
+      isCancelled = true;
+    };
   }, [selectedDate]);
 
   if (selectedTimeSlot) {
@@ -317,29 +429,22 @@ function CourtsForDate({ selectedDate }: { selectedDate: Date }) {
         let accessories: List.Item.Accessory[] = [];
 
         if (isLoading) {
-          icon = Icon.QuestionMark;
+          icon = Icon.CircleProgress;
           iconTint = Color.SecondaryText;
           subtitle = "Loading...";
         } else if (!availability) {
           icon = Icon.XMarkCircle;
           iconTint = Color.Red;
           subtitle = "Error";
-        } else if (availability.status === "reserved") {
-          icon = Icon.Lock;
-          iconTint = Color.SecondaryText;
-          if (isRangeStart && rangeEnd && rangeEnd !== time) {
-            title = `${time} - ${rangeEnd}`;
-            subtitle = "Unavailable";
-            accessories = [{ tag: { value: "Reserved", color: Color.SecondaryText } }];
-          } else {
-            subtitle = "Unavailable";
-            accessories = [{ tag: { value: "Reserved", color: Color.SecondaryText } }];
-          }
         } else if (availability.status === "no-courts") {
           icon = Icon.XMarkCircle;
           iconTint = Color.Red;
-          subtitle = "Fully Booked";
-          accessories = [{ tag: { value: "Booked", color: Color.Red } }];
+          subtitle = "No courts available";
+          
+          // If it's a range, update the title
+          if (isRangeStart && rangeEnd && rangeEnd !== time) {
+            title = `${time} - ${rangeEnd}`;
+          }
         } else {
           // Available courts
           icon = Icon.CheckCircle;
@@ -393,13 +498,6 @@ function CourtsForDate({ selectedDate }: { selectedDate: Date }) {
                             />
                           ))}
                         </List.Item.Detail.Metadata.TagList>
-                      </>
-                    )}
-
-                    {availability && availability.status === "reserved" && (
-                      <>
-                        <List.Item.Detail.Metadata.Label title="Status" text="Unavailable" />
-                        <List.Item.Detail.Metadata.Label title="Note" text="Reserved for events" />
                       </>
                     )}
 

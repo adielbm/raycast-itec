@@ -141,6 +141,7 @@ export function getNextDays(startDate: Date, days: number): Date[] {
 /**
  * Generate time slots for a specific date starting from current hour if it's today
  * Can accept custom time slots from the API or use default slots
+ * Filters to show half-hour slots only when the next full hour is not available
  */
 export function generateTimeSlotsForDate(
   date: Date,
@@ -153,9 +154,23 @@ export function generateTimeSlotsForDate(
   const currentHour = now.getHours();
 
   // Filter slots if it's today
-  const slotsToInclude = isToday 
+  let slotsToInclude = isToday 
     ? validSlots.filter((slot) => parseInt(slot.split(":")[0]) > currentHour)
     : validSlots;
+
+  // Filter: include half-hour slots only if the next full hour is not available
+  slotsToInclude = slotsToInclude.filter((slot) => {
+    if (slot.endsWith(':00')) {
+      // Always include full hours
+      return true;
+    } else if (slot.endsWith(':30')) {
+      // Include half hour only if the next full hour is NOT in the list
+      const [hours, _] = slot.split(':');
+      const nextHour = String(parseInt(hours) + 1).padStart(2, '0') + ':00';
+      return !slotsToInclude.includes(nextHour);
+    }
+    return true;
+  });
 
   for (const time of slotsToInclude) {
     slots.push({ date: new Date(date), time });
