@@ -115,7 +115,7 @@ export async function fetchTimeSlots(
   const dayOfWeek = date.getDay(); // 0 = Sunday, 6 = Saturday
   const cacheKey = `timeslots_${unitId}_${dayOfWeek}`;
 
-  console.log(`[fetchTimeSlots] Fetching for unitId=${unitId}, dayOfWeek=${dayOfWeek}, cacheKey=${cacheKey}`);
+  // console.log(`[fetchTimeSlots] Fetching for unitId=${unitId}, dayOfWeek=${dayOfWeek}, cacheKey=${cacheKey}`);
 
   // Check cache first
   if (timeSlotsCache.has(cacheKey)) {
@@ -123,15 +123,15 @@ export async function fetchTimeSlots(
     if (cached) {
       try {
         const parsed = JSON.parse(cached);
-        console.log(`[fetchTimeSlots] Cache HIT - returning ${parsed.length} slots:`, parsed);
+        // console.log(`[fetchTimeSlots] Cache HIT - returning ${parsed.length} slots:`, parsed);
         return parsed;
       } catch (e) {
-        console.log(`[fetchTimeSlots] Cache parse error:`, e);
+        // console.log(`[fetchTimeSlots] Cache parse error:`, e);
         // Invalid cache, continue to fetch
       }
     }
   }
-  console.log(`[fetchTimeSlots] Cache MISS - fetching from API`);
+  // console.log(`[fetchTimeSlots] Cache MISS - fetching from API`);
 
   try {
     // Get authentication tokens
@@ -146,7 +146,7 @@ export async function fetchTimeSlots(
     const day = String(date.getDate()).padStart(2, "0");
     const dateStr = `${year}-${month}-${day}`;
 
-    console.log(`[fetchTimeSlots] Request params: unit_id=${unitId}, date=${dateStr}, court_type=1`);
+    // console.log(`[fetchTimeSlots] Request params: unit_id=${unitId}, date=${dateStr}, court_type=1`);
 
     // Prepare form data
     const formData = new URLSearchParams();
@@ -165,27 +165,27 @@ export async function fetchTimeSlots(
     });
 
     if (!response.ok) {
-      console.log(`[fetchTimeSlots] HTTP error! status: ${response.status}`);
+      // console.log(`[fetchTimeSlots] HTTP error! status: ${response.status}`);
       throw new Error(`HTTP error! status: ${response.status}`);
     }
 
     const responseText = await response.text();
-    console.log(`[fetchTimeSlots] Response length: ${responseText.length} chars`);
-    console.log(`[fetchTimeSlots] Full response:`, responseText);
+    // console.log(`[fetchTimeSlots] Response length: ${responseText.length} chars`);
+    // console.log(`[fetchTimeSlots] Full response:`, responseText);
     
     // Find the start_hour section
     const startHourIndex = responseText.indexOf("start_hour_select");
     if (startHourIndex !== -1) {
-      console.log(`[fetchTimeSlots] start_hour section:`, responseText.substring(startHourIndex, startHourIndex + 1000));
+      // console.log(`[fetchTimeSlots] start_hour section:`, responseText.substring(startHourIndex, startHourIndex + 1000));
     }
 
     // Parse the JavaScript response to extract time slots
     const timeSlots = parseTimeSlots(responseText);
-    console.log(`[fetchTimeSlots] Parsed ${timeSlots.length} time slots:`, timeSlots);
+    // console.log(`[fetchTimeSlots] Parsed ${timeSlots.length} time slots:`, timeSlots);
 
     // Cache the result
     timeSlotsCache.set(cacheKey, JSON.stringify(timeSlots));
-    console.log(`[fetchTimeSlots] Cached result for key: ${cacheKey}`);
+    // console.log(`[fetchTimeSlots] Cached result for key: ${cacheKey}`);
 
     return timeSlots;
   } catch (error) {
@@ -216,7 +216,7 @@ function parseTimeSlots(responseText: string): string[] {
 
   for (let i = 0; i < patterns.length; i++) {
     const pattern = patterns[i];
-    console.log(`[parseTimeSlots] Trying pattern ${i + 1}: ${pattern}`);
+    // console.log(`[parseTimeSlots] Trying pattern ${i + 1}: ${pattern}`);
     
     pattern.lastIndex = 0; 
     let match;
@@ -230,13 +230,13 @@ function parseTimeSlots(responseText: string): string[] {
       // Check !includes to prevent duplicates
       if (time.endsWith(":00") && !timeSlots.includes(time)) {
         timeSlots.push(time);
-        console.log(`[parseTimeSlots] ✓ Added time slot: ${time}`);
+        // console.log(`[parseTimeSlots] ✓ Added time slot: ${time}`);
       }
     }
     
     // If we found slots with this pattern, we can stop checking other patterns
     if (timeSlots.length > 0) {
-      console.log(`[parseTimeSlots] Success with pattern ${i+1}! Found ${timeSlots.length} slots`);
+      // console.log(`[parseTimeSlots] Success with pattern ${i+1}! Found ${timeSlots.length} slots`);
       break;
     }
   }
@@ -257,7 +257,7 @@ export interface SelectCourtParams {
 export async function selectCourt(
   params: SelectCourtParams,
   credentials: AuthCredentials
-): Promise<boolean> {
+): Promise<string | null> {
   try {
     // Get authentication tokens
     const tokens = await getAuthTokens(credentials);
@@ -272,28 +272,32 @@ export async function selectCourt(
     url.searchParams.append("end_time", params.endTime);
     url.searchParams.append("start_time", params.startTime);
 
-    console.log(`[selectCourt] Making POST request to: ${url.toString()}`);
+    // console.log(`[selectCourt] Making POST request to: ${url.toString()}`);
 
-    // Make the POST request
+    // Make the POST request - this sets up the selection on the server session
     const response = await fetch(url.toString(), {
       method: "POST",
       headers: {
         Cookie: `_session_id=${tokens.sessionId}`,
         "X-Requested-With": "XMLHttpRequest",
       },
+      redirect: "manual",
     });
 
-    if (!response.ok) {
+    if (!response.ok && response.status !== 302) {
       console.error(`[selectCourt] HTTP error! status: ${response.status}`);
-      return false;
+      return null;
     }
 
     const responseText = await response.text();
-    console.log(`[selectCourt] Response:`, responseText);
+    // console.log(`[selectCourt] Response:`, responseText);
 
-    return true;
+    // Return the court invitation page
+    // Unfortunately, the browser won't have our session cookie, so the user
+    // will need to log in on the website to see/complete the booking
+    return `${BASE_URL}/self_services/court_invitation`;
   } catch (error) {
     console.error("Error selecting court:", error);
-    return false;
+    return null;
   }
 }

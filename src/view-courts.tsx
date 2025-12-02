@@ -1,4 +1,4 @@
-import { List, getPreferenceValues, showToast, Toast, Color, Icon, Action, ActionPanel, Cache, open } from "@raycast/api";
+import { List, getPreferenceValues, showToast, Toast, Color, Icon, Action, ActionPanel, Cache, open, Clipboard, showHUD } from "@raycast/api";
 import { useState, useEffect } from "react";
 import { searchCourts, fetchTimeSlots, selectCourt } from "./services/api";
 import { getToday, getNextDays, generateTimeSlotsForDate, formatDisplayDateTime, formatDateDisplay } from "./utils/date";
@@ -23,13 +23,13 @@ interface TimeSlotResult {
 // Cache for reserved slots (persists across extension sessions)
 const reservedCache = new Cache();
 
-function CourtsList({ 
-  slots, 
-  time, 
+function CourtsList({
+  slots,
+  time,
   date,
-  onBack 
-}: { 
-  slots: CourtSlot[]; 
+  onBack
+}: {
+  slots: CourtSlot[];
   time: string;
   date: Date;
   onBack: () => void;
@@ -48,7 +48,7 @@ function CourtsList({
 
       for (const duration of durations) {
         const courtMap = new Map<number, CourtAvailability>();
-        
+
         const availability = await searchCourts(
           {
             unitId: preferences.tennisCenter,
@@ -79,55 +79,8 @@ function CourtsList({
     fetchDurationAvailability();
   }, [time, date, preferences.tennisCenter, preferences.email, preferences.userId]);
 
-  const handleSelectCourt = async (slot: CourtSlot, duration: number) => {
-    // Find the slot for the requested duration
-    const durationAvailability = availabilityByDuration.get(duration);
-    const courtAvailability = durationAvailability?.get(slot.courtNumber);
-    const targetSlot = courtAvailability?.slots.find(s => s.courtNumber === slot.courtNumber);
-
-    if (!targetSlot) {
-      showToast({
-        style: Toast.Style.Failure,
-        title: "Error",
-        message: "Court slot information not found",
-      });
-      return;
-    }
-
-    showToast({
-      style: Toast.Style.Animated,
-      title: "Selecting court...",
-      message: `Court ${slot.courtNumber} - ${duration}h at ${time}`,
-    });
-
-    const success = await selectCourt(
-      {
-        courtId: targetSlot.courtId,
-        duration: targetSlot.duration,
-        startTime: targetSlot.startTime,
-        endTime: targetSlot.endTime,
-      },
-      {
-        email: preferences.email,
-        userId: preferences.userId,
-      }
-    );
-
-    if (success) {
-      showToast({
-        style: Toast.Style.Success,
-        title: "Court selected!",
-        message: `Court ${slot.courtNumber} - ${duration}h at ${time}`,
-      });
-      // Open the booking page in browser
-      await open("https://center.tennis.org.il/self_services/court_invitation");
-    } else {
-      showToast({
-        style: Toast.Style.Failure,
-        title: "Failed to select court",
-        message: "Please try again",
-      });
-    }
+  const handleOpenBookingPage = async () => {
+    await open("https://center.tennis.org.il/self_services/court_invitation");
   };
 
   // Check which durations are available for each court
@@ -142,36 +95,28 @@ function CourtsList({
   };
 
   return (
-    <List 
-      navigationTitle={`Select Court - ${time}`} 
+    <List
+      navigationTitle={`Select Court - ${time}`}
       searchBarPlaceholder="Choose a court..."
       isLoading={isLoadingDurations}
     >
       {slots.map((slot) => {
         const availableDurations = getAvailableDurations(slot.courtNumber);
-        const hasMultipleDurations = availableDurations.length > 1;
 
         return (
           <List.Item
             key={slot.courtId}
-            icon={{ source: Icon.Circle, tintColor: Color.Green }}
+            icon={{ source: Icon.TennisBall, tintColor: Color.Green }}
             title={`Court ${slot.courtNumber}`}
             subtitle={availableDurations.length > 0 ? `Up to ${Math.max(...availableDurations)} hour${Math.max(...availableDurations) > 1 ? 's' : ''}` : ''}
             actions={
               <ActionPanel>
-                <ActionPanel.Section title="Select Duration">
-                  {availableDurations.map((duration) => (
-                    <Action
-                      key={duration}
-                      title={`Book for ${duration} Hour${duration > 1 ? 's' : ''}`}
-                      onAction={() => handleSelectCourt(slot, duration)}
-                      shortcut={duration === 1 ? { modifiers: [], key: "return" } : undefined}
-                    />
-                  ))}
-                </ActionPanel.Section>
-                <ActionPanel.Section>
-                  <Action title="Go Back" onAction={onBack} />
-                </ActionPanel.Section>
+                <Action
+                  title="Open tennis.org.il"
+                  icon={Icon.Globe}
+                  onAction={handleOpenBookingPage}
+                />
+                <Action title="Go Back" onAction={onBack} />
               </ActionPanel>
             }
           />
@@ -190,8 +135,8 @@ function CourtsForDate({ selectedDate }: { selectedDate: Date }) {
   useEffect(() => {
     async function fetchCourts() {
       try {
-        console.log(`[fetchCourts] Starting for date: ${selectedDate.toDateString()}, center: ${preferences.tennisCenter}`);
-        
+        // console.log(`[fetchCourts] Starting for date: ${selectedDate.toDateString()}, center: ${preferences.tennisCenter}`);
+
         // First, fetch available time slots for this unit and date
         const availableTimeSlots = await fetchTimeSlots(
           preferences.tennisCenter,
@@ -202,11 +147,11 @@ function CourtsForDate({ selectedDate }: { selectedDate: Date }) {
           }
         );
 
-        console.log(`[fetchCourts] Received ${availableTimeSlots.length} time slots from API:`, availableTimeSlots);
+        // console.log(`[fetchCourts] Received ${availableTimeSlots.length} time slots from API:`, availableTimeSlots);
 
         // Generate time slots for the selected date using fetched slots
         const slots = generateTimeSlotsForDate(selectedDate, availableTimeSlots);
-        console.log(`[fetchCourts] Generated ${slots.length} slots for display:`, slots);
+        // console.log(`[fetchCourts] Generated ${slots.length} slots for display:`, slots);
 
         // Initialize results with loading state
         const initialResults: TimeSlotResult[] = slots.map((slot) => ({
@@ -349,18 +294,18 @@ function CourtsForDate({ selectedDate }: { selectedDate: Date }) {
 
   if (selectedTimeSlot) {
     return (
-      <CourtsList 
-        slots={selectedTimeSlot.slots} 
+      <CourtsList
+        slots={selectedTimeSlot.slots}
         time={selectedTimeSlot.time}
         date={selectedDate}
-        onBack={() => setSelectedTimeSlot(null)} 
+        onBack={() => setSelectedTimeSlot(null)}
       />
     );
   }
 
   return (
     <List isLoading={isInitialLoad} searchBarPlaceholder={`${formatDateDisplay(selectedDate)}`}
-    navigationTitle={formatDateDisplay(selectedDate)}>
+      navigationTitle={formatDateDisplay(selectedDate)}>
       {results.filter((r) => r != null && r.time != null).map((result, index) => {
         const { availability, time, isLoading, isRangeStart, rangeEnd } = result;
 
@@ -418,7 +363,12 @@ function CourtsForDate({ selectedDate }: { selectedDate: Date }) {
               availability && availability.status === "available" && availability.slots.length > 0 ? (
                 <ActionPanel>
                   <Action
+                    title="Open tennis.org.il"
+                    icon={Icon.Globe} onAction={() => open("https://center.tennis.org.il/self_services/court_invitation")}
+                  />
+                  <Action
                     title="View Available Courts"
+                    icon={Icon.List}
                     onAction={() => setSelectedTimeSlot({ slots: availability.slots, time })}
                   />
                 </ActionPanel>
@@ -444,7 +394,7 @@ function CourtsForDate({ selectedDate }: { selectedDate: Date }) {
                           ))}
                         </List.Item.Detail.Metadata.TagList>
                       </>
-                    )} 
+                    )}
 
                     {availability && availability.status === "reserved" && (
                       <>

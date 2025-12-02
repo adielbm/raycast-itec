@@ -83,7 +83,7 @@ export function parseCourtAvailability(response: string): CourtAvailability {
 
   if (isReserved(html)) {
 
-    console.log("isReserved");
+    // console.log("isReserved");
 
     return {
       status: "reserved",
@@ -94,7 +94,7 @@ export function parseCourtAvailability(response: string): CourtAvailability {
 
   if (isNoCourtsAvailable(html)) {
 
-    console.log("isNoCourtsAvailable");
+    // console.log("isNoCourtsAvailable");
 
     return {
       status: "no-courts",
@@ -110,7 +110,7 @@ export function parseCourtAvailability(response: string): CourtAvailability {
   // it means all courts are booked (taken by other people)
   if (slots.length === 0) {
 
-    console.log("slots.length === 0");
+    // console.log("slots.length === 0");
 
     return {
       status: "no-courts",
