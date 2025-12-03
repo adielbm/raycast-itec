@@ -1,8 +1,9 @@
-import { List, getPreferenceValues, showToast, Toast, Color, Icon, Action, ActionPanel, Cache, open, Clipboard, showHUD } from "@raycast/api";
+import { List, getPreferenceValues, showToast, Toast, Color, Icon, Action, ActionPanel, Cache, open, Clipboard, showHUD, confirmAlert } from "@raycast/api";
 import { useState, useEffect } from "react";
 import { searchCourts, fetchTimeSlots, selectCourt } from "./services/api";
 import { getToday, getNextDays, generateTimeSlotsForDate, formatDisplayDateTime, formatDateDisplay } from "./utils/date";
 import { CourtAvailability, CourtSlot } from "./utils/parser";
+import { bookCourtAutomatically } from "./services/puppeteer";
 
 interface Preferences {
   tennisCenter: string;
@@ -37,6 +38,7 @@ function CourtsList({
   const preferences = getPreferenceValues<Preferences>();
   const [availabilityByDuration, setAvailabilityByDuration] = useState<Map<number, Map<number, CourtAvailability>>>(new Map());
   const [isLoadingDurations, setIsLoadingDurations] = useState(true);
+  const [isBooking, setIsBooking] = useState(false);
 
   // Extract unique court numbers from slots
   const courtNumbers = [...new Set(slots.map(s => s.courtNumber))];
@@ -78,9 +80,61 @@ function CourtsList({
 
     fetchDurationAvailability();
   }, [time, date, preferences.tennisCenter, preferences.email, preferences.userId]);
-
   const handleOpenBookingPage = async () => {
     await open("https://center.tennis.org.il/self_services/court_invitation");
+  };
+
+  const handleBookCourt = async (slot: CourtSlot, duration: number = 1) => {
+    if (isBooking) {
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "Booking in progress",
+        message: "Please wait for the current booking to complete",
+      });
+      return;
+    }
+
+    const confirmed = await confirmAlert({
+      title: "Confirm Booking",
+      message: `Book Court ${slot.courtNumber} at ${time} for ${duration} hour${duration > 1 ? 's' : ''}?`,
+      primaryAction: {
+        title: "Book Court",
+      },
+    });
+
+    if (!confirmed) {
+      return;
+    }
+
+    setIsBooking(true);
+
+    try {
+      const success = await bookCourtAutomatically({
+        unitId: preferences.tennisCenter,
+        courtId: slot.courtId,
+        courtNumber: slot.courtNumber,
+        date: date,
+        startHour: time,
+        duration: duration,
+      });
+
+      if (success) {
+        await showToast({
+          style: Toast.Style.Success,
+          title: "Booking completed!",
+          message: `Court ${slot.courtNumber} has been booked`,
+        });
+      }
+    } catch (error) {
+      console.error("Error booking court:", error);
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "Booking failed",
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
+    } finally {
+      setIsBooking(false);
+    }
   };
 
   // Check which durations are available for each court
@@ -98,7 +152,7 @@ function CourtsList({
     <List
       navigationTitle={`Select Court - ${time}`}
       searchBarPlaceholder="Choose a court..."
-      isLoading={isLoadingDurations}
+      isLoading={isLoadingDurations || isBooking}
     >
       {slots.map((slot) => {
         const availableDurations = getAvailableDurations(slot.courtNumber);
@@ -111,12 +165,26 @@ function CourtsList({
             subtitle={availableDurations.length > 0 ? `Up to ${Math.max(...availableDurations)} hour${Math.max(...availableDurations) > 1 ? 's' : ''}` : ''}
             actions={
               <ActionPanel>
-                <Action
-                  title="Open tennis.org.il"
-                  icon={Icon.Globe}
-                  onAction={handleOpenBookingPage}
-                />
-                <Action title="Go Back" onAction={onBack} />
+                <ActionPanel.Section title="Booking">
+                  {availableDurations.map((duration) => (
+                    <Action
+                      key={duration}
+                      title={`Book for ${duration} Hour${duration > 1 ? 's' : ''}`}
+                      icon={Icon.CheckCircle}
+                      onAction={() => handleBookCourt(slot, duration)}
+                    />
+                  ))}
+                  {availableDurations.length === 0 && (
+                    <Action
+                      title="Book for 1 Hour"
+                      icon={Icon.CheckCircle}
+                      onAction={() => handleBookCourt(slot, 1)}
+                    />
+                  )}
+                </ActionPanel.Section>
+                <ActionPanel.Section title="Other Actions">
+                  <Action title="Go Back" icon={Icon.ArrowLeft} onAction={onBack} />
+                </ActionPanel.Section>
               </ActionPanel>
             }
           />
@@ -134,11 +202,11 @@ function CourtsForDate({ selectedDate }: { selectedDate: Date }) {
 
   useEffect(() => {
     let isCancelled = false;
-    
+
     async function fetchCourts() {
       try {
         // console.log(`[fetchCourts] Starting for date: ${selectedDate.toDateString()}, center: ${preferences.tennisCenter}`);
-        
+
         if (isCancelled) {
           // console.log(`[fetchCourts] Cancelled before starting`);
           return;
@@ -187,7 +255,7 @@ function CourtsForDate({ selectedDate }: { selectedDate: Date }) {
           const batchPromises = batchSlots.map(async (slot, batchIndex) => {
             const actualIndex = batchStart + batchIndex;
             // console.log(`[fetchCourts] Fetching slot ${actualIndex}: ${slot.time}`);
-        
+
             const availability = await searchCourts(
               {
                 unitId: preferences.tennisCenter,
@@ -207,12 +275,12 @@ function CourtsForDate({ selectedDate }: { selectedDate: Date }) {
           });
 
           const batchResults = await Promise.all(batchPromises);
-          
+
           if (isCancelled) {
             // console.log(`[fetchCourts] Cancelled after batch ${batchStart}-${batchEnd - 1}`);
             return;
           }
-          
+
           // console.log(`[fetchCourts] Batch ${batchStart}-${batchEnd - 1} completed, results:`, batchResults.map(r => ({ index: r.index, time: slots[r.index]?.time, status: r.availability?.status })));
 
           // Collect suggested times from no-courts responses
@@ -243,7 +311,7 @@ function CourtsForDate({ selectedDate }: { selectedDate: Date }) {
             await new Promise((resolve) => setTimeout(resolve, 200));
           }
         }
-        
+
         if (isCancelled) {
           // console.log(`[fetchCourts] Cancelled after all batches`);
           return;
@@ -253,19 +321,19 @@ function CourtsForDate({ selectedDate }: { selectedDate: Date }) {
         if (allSuggestedTimes.size > 0) {
           const suggestedTimes = Array.from(allSuggestedTimes);
           // console.log(`[fetchCourts] All batches complete. Suggested times found:`, suggestedTimes);
-          
+
           // Determine which times are new (not in the original slots)
           const initialTimeSet = new Set(slots.map(s => s.time));
           const newTimesToFetch = suggestedTimes.filter(time => !initialTimeSet.has(time));
-          
+
           if (newTimesToFetch.length > 0) {
             // console.log(`[fetchCourts] Adding ${newTimesToFetch.length} new suggested slots:`, newTimesToFetch);
-            
+
             // Add new slots to the list with loading state
             setResults((prevResults) => {
               const existingTimes = new Set(prevResults.map(r => r.time));
               const newSlots: TimeSlotResult[] = [];
-              
+
               newTimesToFetch.forEach(time => {
                 if (!existingTimes.has(time)) {
                   newSlots.push({
@@ -277,7 +345,7 @@ function CourtsForDate({ selectedDate }: { selectedDate: Date }) {
                   });
                 }
               });
-              
+
               if (newSlots.length > 0) {
                 return [...prevResults, ...newSlots].sort((a, b) => {
                   // Sort by time
@@ -288,12 +356,12 @@ function CourtsForDate({ selectedDate }: { selectedDate: Date }) {
               }
               return prevResults;
             });
-            
+
             // Fetch availability for newly added suggested slots
             // console.log(`[fetchCourts] Fetching availability for ${newTimesToFetch.length} suggested times`);
             for (const time of newTimesToFetch) {
               if (isCancelled) return;
-              
+
               // console.log(`[fetchCourts] Fetching availability for suggested time: ${time}`);
               const availability = await searchCourts(
                 {
@@ -307,9 +375,9 @@ function CourtsForDate({ selectedDate }: { selectedDate: Date }) {
                   userId: preferences.userId,
                 }
               );
-              
+
               // console.log(`[fetchCourts] Received availability for suggested time ${time}:`, availability?.status);
-              
+
               if (!isCancelled) {
                 setResults((prevResults) => {
                   const newResults = [...prevResults];
@@ -324,13 +392,13 @@ function CourtsForDate({ selectedDate }: { selectedDate: Date }) {
                   return newResults;
                 });
               }
-              
+
               await new Promise((resolve) => setTimeout(resolve, 100));
             }
           }
           // console.log(`[fetchCourts] Finished fetching all suggested times`);
         }
-        
+
         // console.log(`[fetchCourts] All batches completed. Final check of loading states...`);
         setResults((prevResults) => {
           const stillLoading = prevResults.filter(r => r.isLoading);
@@ -338,23 +406,23 @@ function CourtsForDate({ selectedDate }: { selectedDate: Date }) {
             console.warn(`[fetchCourts] WARNING: ${stillLoading.length} slots still loading:`, stillLoading.map(r => r.time));
             return prevResults;
           }
-          
+
           // console.log(`[fetchCourts] All slots loaded successfully. Merging consecutive no-courts ranges...`);
-          
+
           // Merge consecutive "no-courts" slots into ranges
           const merged: TimeSlotResult[] = [];
           let i = 0;
-          
+
           while (i < prevResults.length) {
             const current = prevResults[i];
-            
+
             // If not no-courts, add as-is
             if (current.availability?.status !== "no-courts") {
               merged.push(current);
               i++;
               continue;
             }
-            
+
             // Find consecutive no-courts slots
             let endIndex = i;
             while (
@@ -363,7 +431,7 @@ function CourtsForDate({ selectedDate }: { selectedDate: Date }) {
             ) {
               endIndex++;
             }
-            
+
             // If single slot or create range
             if (endIndex === i) {
               merged.push(current);
@@ -375,10 +443,10 @@ function CourtsForDate({ selectedDate }: { selectedDate: Date }) {
                 rangeEnd: prevResults[endIndex].time,
               });
             }
-            
+
             i = endIndex + 1;
           }
-          
+
           // console.log(`[fetchCourts] Merged ${prevResults.length} slots into ${merged.length} items`);
           return merged;
         });
@@ -397,7 +465,7 @@ function CourtsForDate({ selectedDate }: { selectedDate: Date }) {
     }
 
     fetchCourts();
-    
+
     return () => {
       // console.log(`[fetchCourts] Cleanup - cancelling fetch for ${selectedDate.toDateString()}`);
       isCancelled = true;
@@ -440,7 +508,7 @@ function CourtsForDate({ selectedDate }: { selectedDate: Date }) {
           icon = Icon.XMarkCircle;
           iconTint = Color.Red;
           subtitle = "No courts available";
-          
+
           // If it's a range, update the title
           if (isRangeStart && rangeEnd && rangeEnd !== time) {
             title = `${time} - ${rangeEnd}`;
@@ -467,10 +535,6 @@ function CourtsForDate({ selectedDate }: { selectedDate: Date }) {
             actions={
               availability && availability.status === "available" && availability.slots.length > 0 ? (
                 <ActionPanel>
-                  <Action
-                    title="Open tennis.org.il"
-                    icon={Icon.Globe} onAction={() => open("https://center.tennis.org.il/self_services/court_invitation")}
-                  />
                   <Action
                     title="View Available Courts"
                     icon={Icon.List}

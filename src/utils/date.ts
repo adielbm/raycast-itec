@@ -188,3 +188,27 @@ export function formatDateDisplay(date: Date): string {
   const dateStr = formatDate(date);
   return `${dayName}, ${dateStr}`;
 }
+
+/**
+ * Get weekday name in Hebrew
+ */
+export function getHebrewWeekday(date: Date): string {
+  const hebrewDays = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
+  return hebrewDays[date.getDay()];
+}
+
+/**
+ * Get weekday name in English (short)
+ */
+export function getWeekday(date: Date): string {
+  const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  return days[date.getDay()];
+}
+
+/**
+ * Check if a date is in the future (after today)
+ */
+export function isFutureDate(date: Date): boolean {
+  const today = getToday();
+  return date >= today;
+}

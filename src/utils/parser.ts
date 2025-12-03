@@ -145,3 +145,66 @@ export function parseSuggestedTimes(html: string): string[] {
   
   return times;
 }
+
+/**
+ * Rental information from user's history
+ */
+export interface Rental {
+  date: string; // Original date string (dd/MM/yyyy)
+  dateObj: Date; // Parsed date object
+  time: string; // Time range (e.g., "10:00-11:00")
+  court: string; // Court name (e.g., "1 (ירושלים)")
+  allocationId?: string; // Allocation ID for cancellation (if cancellable)
+}
+
+/**
+ * Parse rental history from HTML response
+ * Example HTML:
+ * <tr class="">
+ *   <td>09/12/2025</td>
+ *   <td>12:00-13:00</td>
+ *   <td>7 (ירושלים)</td>
+ *   <td style="color: red"></td>
+ *   <td style="text-align: left">
+ *     <a class="btn btn-sm btn-danger btn-cancel" ... href="/self_services/cancel_rent_allocation/8119602.js">...</a>
+ *   </td>
+ * </tr>
+ */
+export function parseMyRents(html: string): Rental[] {
+  const rentals: Rental[] = [];
+  
+  // Match table rows with rental data - we need to capture the entire row to check for cancel button
+  const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/g;
+  
+  let match;
+  while ((match = rowRegex.exec(html)) !== null) {
+    const rowHtml = match[1];
+    
+    // Extract date, time, and court from the row
+    const dataMatch = rowHtml.match(/<td>(\d{2}\/\d{2}\/\d{4})<\/td>\s*<td>(\d{2}:\d{2}-\d{2}:\d{2})<\/td>\s*<td>([^<]+)<\/td>/);
+    
+    if (!dataMatch) continue;
+    
+    const dateStr = dataMatch[1]; // e.g., "09/12/2025"
+    const time = dataMatch[2]; // e.g., "12:00-13:00"
+    const court = dataMatch[3].trim(); // e.g., "7 (ירושלים)"
+    
+    // Parse date from dd/MM/yyyy format
+    const [day, month, year] = dateStr.split('/').map(Number);
+    const dateObj = new Date(year, month - 1, day);
+    
+    // Check if there's a cancel button and extract allocation ID
+    const cancelMatch = rowHtml.match(/cancel_rent_allocation\/(\d+)\.js/);
+    const allocationId = cancelMatch ? cancelMatch[1] : undefined;
+    
+    rentals.push({
+      date: dateStr,
+      dateObj,
+      time,
+      court,
+      allocationId,
+    });
+  }
+  
+  return rentals;
+}

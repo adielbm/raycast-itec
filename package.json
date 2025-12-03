@@ -15,6 +15,12 @@
       "title": "Check Availability",
       "description": "Check available tennis courts by date",
       "mode": "view"
+    },
+    {
+      "name": "view-rents",
+      "title": "My Upcoming Rentals",
+      "description": "View your upcoming court rentals",
+      "mode": "view"
     }
   ],
   "preferences": [
@@ -26,24 +32,78 @@
       "description": "Select your preferred tennis center",
       "default": "2",
       "data": [
-        { "title": "אופקים", "value": "12" },
-        { "title": "אשקלון", "value": "8" },
-        { "title": "באר שבע", "value": "11" },
-        { "title": "דימונה", "value": "40" },
-        { "title": "חיפה", "value": "5" },
-        { "title": "טבריה", "value": "9" },
-        { "title": "יפו", "value": "3" },
-        { "title": "יקנעם", "value": "14" },
-        { "title": "ירושלים", "value": "7" },
-        { "title": "כוכב יאיר", "value": "46" },
-        { "title": "נהריה", "value": "37" },
-        { "title": "סאג'ור", "value": "15" },
-        { "title": "עכו", "value": "16" },
-        { "title": "ערד", "value": "6" },
-        { "title": "קרית אונו", "value": "10" },
-        { "title": "קרית שמונה", "value": "4" },
-        { "title": "רמת השרון", "value": "2" },
-        { "title": "תל אביב (יד אליהו)", "value": "13" }
+        {
+          "title": "אופקים",
+          "value": "12"
+        },
+        {
+          "title": "אשקלון",
+          "value": "8"
+        },
+        {
+          "title": "באר שבע",
+          "value": "11"
+        },
+        {
+          "title": "דימונה",
+          "value": "40"
+        },
+        {
+          "title": "חיפה",
+          "value": "5"
+        },
+        {
+          "title": "טבריה",
+          "value": "9"
+        },
+        {
+          "title": "יפו",
+          "value": "3"
+        },
+        {
+          "title": "יקנעם",
+          "value": "14"
+        },
+        {
+          "title": "ירושלים",
+          "value": "7"
+        },
+        {
+          "title": "כוכב יאיר",
+          "value": "46"
+        },
+        {
+          "title": "נהריה",
+          "value": "37"
+        },
+        {
+          "title": "סאג'ור",
+          "value": "15"
+        },
+        {
+          "title": "עכו",
+          "value": "16"
+        },
+        {
+          "title": "ערד",
+          "value": "6"
+        },
+        {
+          "title": "קרית אונו",
+          "value": "10"
+        },
+        {
+          "title": "קרית שמונה",
+          "value": "4"
+        },
+        {
+          "title": "רמת השרון",
+          "value": "2"
+        },
+        {
+          "title": "תל אביב (יד אליהו)",
+          "value": "13"
+        }
       ]
     },
     {
@@ -61,12 +121,21 @@
       "title": "ID Number",
       "description": "Your Israeli ID number",
       "placeholder": "123456789"
+    },
+    {
+      "name": "chromePath",
+      "type": "textfield",
+      "required": false,
+      "title": "Chrome/Chromium Path (Optional)",
+      "description": "Path to Chrome or Chromium executable. Leave empty to auto-detect.",
+      "placeholder": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
     }
   ],
   "dependencies": {
     "@raycast/api": "^1.83.2",
     "@raycast/utils": "^1.17.0",
-    "node-fetch": "^3.3.2"
+    "node-fetch": "^3.3.2",
+    "puppeteer-core": "^24.31.0"
   },
   "devDependencies": {
     "@raycast/eslint-config": "^1.0.11",

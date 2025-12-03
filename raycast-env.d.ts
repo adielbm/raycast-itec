@@ -13,7 +13,9 @@ type ExtensionPreferences = {
   /** Email - Your ITEC account email */
   "email": string,
   /** ID Number - Your Israeli ID number */
-  "userId": string
+  "userId": string,
+  /** Chrome/Chromium Path (Optional) - Path to Chrome or Chromium executable. Leave empty to auto-detect. */
+  "chromePath"?: string
 }
 
 /** Preferences accessible in all the extension's commands */
@@ -22,10 +24,14 @@ declare type Preferences = ExtensionPreferences
 declare namespace Preferences {
   /** Preferences accessible in the `view-courts` command */
   export type ViewCourts = ExtensionPreferences & {}
+  /** Preferences accessible in the `view-rents` command */
+  export type ViewRents = ExtensionPreferences & {}
 }
 
 declare namespace Arguments {
   /** Arguments passed to the `view-courts` command */
   export type ViewCourts = {}
+  /** Arguments passed to the `view-rents` command */
+  export type ViewRents = {}
 }
 

@@ -8,6 +8,7 @@ const BASE_URL = "https://center.tennis.org.il";
 const SEARCH_COURT_URL = `${BASE_URL}/self_services/search_court.js`;
 const SET_TIME_BY_UNIT_URL = `${BASE_URL}/self_services/set_time_by_unit`;
 const SELECT_COURT_URL = `${BASE_URL}/self_services/select_court_invitation.js`;
+const MY_RENTS_URL = `${BASE_URL}/self_services/my_rents`;
 
 // Cache for time slots by unit and weekday
 const timeSlotsCache = new Cache();
@@ -264,6 +265,70 @@ function parseTimeSlots(responseText: string): string[] {
 
   // console.log(`[parseTimeSlots] Filtered to ${filteredSlots.length} slots:`, filteredSlots);
   return filteredSlots;
+}
+
+/**
+ * Fetch user's rental history
+ */
+export async function fetchMyRents(credentials: AuthCredentials): Promise<string | null> {
+  try {
+    // Get authentication tokens
+    const tokens = await getAuthTokens(credentials);
+    if (!tokens) {
+      throw new Error("Failed to authenticate");
+    }
+
+    // Make the request
+    const response = await fetch(MY_RENTS_URL, {
+      method: "GET",
+      headers: {
+        Cookie: `_session_id=${tokens.sessionId}`,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const responseText = await response.text();
+    return responseText;
+  } catch (error) {
+    console.error("Error fetching my rents:", error);
+    return null;
+  }
+}
+
+/**
+ * Cancel a rental allocation
+ */
+export async function cancelRent(allocationId: string, credentials: AuthCredentials): Promise<boolean> {
+  try {
+    // Get authentication tokens
+    const tokens = await getAuthTokens(credentials);
+    if (!tokens) {
+      throw new Error("Failed to authenticate");
+    }
+
+    const cancelUrl = `${BASE_URL}/self_services/cancel_rent_allocation/${allocationId}.js`;
+
+    // Make the POST request to cancel
+    const response = await fetch(cancelUrl, {
+      method: "POST",
+      headers: {
+        Cookie: `_session_id=${tokens.sessionId}`,
+        "X-Requested-With": "XMLHttpRequest",
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    return true;
+  } catch (error) {
+    console.error("Error canceling rent:", error);
+    return false;
+  }
 }
 
 /**
