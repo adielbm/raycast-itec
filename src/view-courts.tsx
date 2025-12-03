@@ -197,7 +197,7 @@ function CourtsList({
 function CourtsForDate({ selectedDate }: { selectedDate: Date }) {
   const preferences = getPreferenceValues<Preferences>();
   const [results, setResults] = useState<TimeSlotResult[]>([]);
-  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [isLoading, setIsLoading] = useState(true);
   const [selectedTimeSlot, setSelectedTimeSlot] = useState<{ slots: CourtSlot[]; time: string } | null>(null);
 
   useEffect(() => {
@@ -205,6 +205,13 @@ function CourtsForDate({ selectedDate }: { selectedDate: Date }) {
 
     async function fetchCourts() {
       try {
+        // Show initial loading toast
+        await showToast({
+          style: Toast.Style.Animated,
+          title: "Loading courts",
+          message: "Fetching available time slots...",
+        });
+
         // console.log(`[fetchCourts] Starting for date: ${selectedDate.toDateString()}, center: ${preferences.tennisCenter}`);
 
         if (isCancelled) {
@@ -238,7 +245,13 @@ function CourtsForDate({ selectedDate }: { selectedDate: Date }) {
         }));
 
         setResults(initialResults);
-        setIsInitialLoad(false);
+
+        // Update toast for checking availability
+        await showToast({
+          style: Toast.Style.Animated,
+          title: "Checking availability",
+          message: `Scanning ${slots.length} time slots...`,
+        });
 
         // Collect all suggested times first, then add them after all batches
         const allSuggestedTimes = new Set<string>();
@@ -328,6 +341,13 @@ function CourtsForDate({ selectedDate }: { selectedDate: Date }) {
 
           if (newTimesToFetch.length > 0) {
             // console.log(`[fetchCourts] Adding ${newTimesToFetch.length} new suggested slots:`, newTimesToFetch);
+
+            // Update toast for suggested times
+            await showToast({
+              style: Toast.Style.Animated,
+              title: "Checking additional slots",
+              message: `Found ${newTimesToFetch.length} suggested time${newTimesToFetch.length > 1 ? 's' : ''}...`,
+            });
 
             // Add new slots to the list with loading state
             setResults((prevResults) => {
@@ -451,6 +471,24 @@ function CourtsForDate({ selectedDate }: { selectedDate: Date }) {
           return merged;
         });
 
+        // All slots are loaded and merged, hide spinner
+        setIsLoading(false);
+
+        // Calculate available count and show success toast
+        setResults((currentResults) => {
+          const availableCount = currentResults.filter(r => r.availability?.status === "available").length;
+          
+          showToast({
+            style: Toast.Style.Success,
+            title: "Courts loaded",
+            message: availableCount > 0 
+              ? `Found ${availableCount} available time slot${availableCount > 1 ? 's' : ''}`
+              : "No available slots found",
+          });
+
+          return currentResults;
+        });
+
       } catch (error) {
         if (!isCancelled) {
           console.error("Error fetching courts:", error);
@@ -459,7 +497,7 @@ function CourtsForDate({ selectedDate }: { selectedDate: Date }) {
             title: "Failed to fetch courts",
             message: error instanceof Error ? error.message : "Unknown error",
           });
-          setIsInitialLoad(false);
+          setIsLoading(false);
         }
       }
     }
@@ -484,7 +522,7 @@ function CourtsForDate({ selectedDate }: { selectedDate: Date }) {
   }
 
   return (
-    <List isLoading={isInitialLoad} searchBarPlaceholder={`${formatDateDisplay(selectedDate)}`}
+    <List isLoading={isLoading} searchBarPlaceholder={`${formatDateDisplay(selectedDate)}`}
       navigationTitle={formatDateDisplay(selectedDate)}>
       {results.filter((r) => r != null && r.time != null).map((result, index) => {
         const { availability, time, isLoading, isRangeStart, rangeEnd } = result;
@@ -497,7 +535,7 @@ function CourtsForDate({ selectedDate }: { selectedDate: Date }) {
         let accessories: List.Item.Accessory[] = [];
 
         if (isLoading) {
-          icon = Icon.CircleProgress;
+          icon = Icon.Circle;
           iconTint = Color.SecondaryText;
           subtitle = "Loading...";
         } else if (!availability) {
